@@ -17,17 +17,24 @@ This script contains functions for loading the following datasets:
 import torch
 import os
 import pickle
-import ipdb
 
 import os.path as osp
 import numpy as np
-import pandas as pd
 import scipy.sparse as sp
 
 from torch_geometric.data import Data
 from torch_sparse import coalesce
 # from randomperm_code import random_planetoid_splits
 from sklearn.feature_extraction.text import CountVectorizer
+
+
+def _require_pandas():
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError("pandas is required only for Yelp/Cornell-style dataset loaders.") from exc
+    return pd
+
 
 def load_LE_dataset(path=None, dataset="ModelNet40", train_percent = 0.025):
     # load edges, features, and labels.
@@ -232,6 +239,7 @@ def load_yelp_dataset(path='./data/raw_data/yelp_raw_datasets/', dataset = 'yelp
         - average stars from 2-10, converted from original stars which is binned in x.5, min stars = 1
     '''
     print(f'Loading hypergraph dataset from {dataset}')
+    pd = _require_pandas()
 
     # first load node features:
     # load longtitude and latitude of restaurant.
@@ -394,6 +402,7 @@ def load_cornell_dataset(path='./data/raw_data/', dataset = 'amazon',
         - average stars from 2-10, converted from original stars which is binned in x.5, min stars = 1
     '''
     print(f'Loading hypergraph dataset from cornell: {dataset}')
+    pd = _require_pandas()
 
     # first load node labels
     df_labels = pd.read_csv(osp.join(path, dataset, f'node-labels-{dataset}.txt'), names = ['node_label'])

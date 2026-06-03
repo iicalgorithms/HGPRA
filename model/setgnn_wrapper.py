@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import logging
-from models import SetGNN
+from .models import SetGNN
 
 class SetGNNWrapper(nn.Module):
     """

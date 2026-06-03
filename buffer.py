@@ -9,14 +9,17 @@ import argparse
 import torch
 import torch.nn.functional as F
 import logging
-from tensorboardX import SummaryWriter
-import deeprobust.graph.utils as utils
 from utils.dataloader import load_data
 from model.model_loader import parse_method
-from utils.utils import sort_training_nodes_bipartite, sort_nodes_by_hyperedge_difficulty, training_scheduler, sort_nodes_by_H_matrix
+from utils.utils import accuracy, get_summary_writer, resolve_device, sort_training_nodes_bipartite, sort_nodes_by_hyperedge_difficulty, training_scheduler, sort_nodes_by_H_matrix
 from torch_geometric.data import Data
 from meta_gradient import add_norm_to_data
 from model_data_parser import load_hnn_parser
+
+
+def snapshot_parameters(model):
+    return [p.detach().cpu().clone() for p in model.parameters()]
+
 
 def weights_init(m):
     if isinstance(m, torch.nn.Linear):
@@ -29,8 +32,9 @@ def main(args):
     random.seed(args.seed_teacher)
     np.random.seed(args.seed_teacher)
     torch.manual_seed(args.seed_teacher)
-    torch.cuda.manual_seed(args.seed_teacher)
-    device = torch.device(args.device)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed_teacher)
+    device = resolve_device(args.device)
 
     data, split_idx_lst = load_data(args)
     split_idx = random.choice(split_idx_lst)
@@ -107,7 +111,7 @@ def main(args):
 
         timestamps = [] # 初始化参数快照列表
 
-        timestamps.append([p.detach().cpu() for p in model.parameters()]) # 保存初始参数
+        timestamps.append(snapshot_parameters(model)) # 保存初始参数
 
         best_val_acc = best_test_acc = best_it = 0 # 初始化最优精度记录
 
@@ -135,7 +139,7 @@ def main(args):
             training_subset = sorted_trainset[:int(size * sorted_trainset.shape[0])]
 
             loss_buffer = F.nll_loss(output[training_subset], labels[training_subset])
-            acc_buffer = utils.accuracy(output[train_idx], labels[train_idx])
+            acc_buffer = accuracy(output[train_idx], labels[train_idx])
             writer.add_scalar('buffer_train_loss_curve', loss_buffer.item(), e)
             writer.add_scalar('buffer_train_acc_curve', acc_buffer.item(), e)
             logging.info("Epochs: {} : Full graph train set results: loss= {:.4f}, accuracy= {:.4f} ".format(e,
@@ -176,8 +180,8 @@ def main(args):
                 loss_val=F.nll_loss(output[val_idx], labels_val)
                 loss_test = F.nll_loss(output[test_idx], labels_test)
 
-                acc_val = utils.accuracy(output[val_idx], labels_val)
-                acc_test = utils.accuracy(output[test_idx], labels_test)
+                acc_val = accuracy(output[val_idx], labels_val)
+                acc_test = accuracy(output[test_idx], labels_test)
 
                 writer.add_scalar('val_set_loss_curve', loss_val.item(), e)
                 writer.add_scalar('val_set_acc_curve', acc_val.item(), e)
@@ -192,7 +196,7 @@ def main(args):
 
             # 保存参数轨迹（每隔 param_save_interval 次）
             if e % args.param_save_interval == 0 and e>1:
-                timestamps.append([p.detach().cpu() for p in model.parameters()])
+                timestamps.append(snapshot_parameters(model))
                 p_current = timestamps[-1]
                 p_0 = timestamps[0]
                 target_params = torch.cat([p_c.data.reshape(-1) for p_c in p_current], 0)
@@ -217,6 +221,14 @@ def main(args):
             if args.save_trajectories:
                 torch.save(trajectories, os.path.join(log_dir, f"replay_buffer_{n}.pt"))
             trajectories = []
+
+    if trajectories:
+        n = 0
+        while os.path.exists(os.path.join(log_dir, f"replay_buffer_{n}.pt")):
+            n += 1
+        logging.info("Saving remaining {}".format(os.path.join(log_dir, f"replay_buffer_{n}.pt")))
+        if args.save_trajectories:
+            torch.save(trajectories, os.path.join(log_dir, f"replay_buffer_{n}.pt"))
 
 if __name__ == '__main__':
     parser = load_hnn_parser()
@@ -258,7 +270,7 @@ if __name__ == '__main__':
     logging.getLogger().addHandler(fh)
     logging.info('This is the log_dir: {}'.format(log_dir))
     # 创建 TensorBoard 日志目录
-    writer = SummaryWriter(log_dir + '/tbx_log')
+    writer = get_summary_writer(log_dir + '/tbx_log')
     # 开始训练
     main(args)
     logging.info(args)

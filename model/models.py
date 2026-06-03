@@ -17,12 +17,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch_geometric.nn.conv import MessagePassing, GCNConv, GATConv
-from layers import *
+from utils.layers import *
 
 import math 
 
 from torch_scatter import scatter
 from torch_geometric.utils import softmax
+
+from utils.layers import HNHNConv, HGNN_conv, HypergraphConv, HalfNLHconv
+
 
 #  This part is for HyperGCN
 

@@ -10,15 +10,15 @@ import logging
 import numpy as np
 import torch
 import torch.nn as nn
-from tensorboardX import SummaryWriter
 from meta_gradient import MetaGtt
 from utils.dataloader import load_data
 from model_data_parser import load_hnn_parser
-from utils.utils import str2bool
+from utils.utils import get_summary_writer, resolve_device, str2bool
 
 def main():
     parser = load_hnn_parser()
     parser.add_argument("--gpu_id", type=int, default=0, help="GPU id")
+    parser.add_argument("--device", type=str, default="auto", help="Device override: auto, cpu, cuda:N, or mps.")
     parser.add_argument("--wandb",type=int,default=0,help="Use wandb")
     parser.add_argument("--whole_data", type=int, default=0)
     parser.add_argument("--transductive", type=int, default=1, help="Transductive setting")
@@ -35,6 +35,12 @@ def main():
     parser.add_argument("--coreset_init_path", type=str, default="logs_AllDeepSets/Coreset")
     parser.add_argument("--coreset_log", type=str, default="logs_AllDeepSets")
     parser.add_argument("--save_log", type=str, default="logs_AllDeepSets", help="path to save logs")
+    parser.add_argument(
+        "--buffer_path",
+        type=str,
+        default="",
+        help="Optional expert-buffer directory to reuse instead of <save_log>/Buffer/<dataset>-buffer.",
+    )
     parser.add_argument("--core_method", type=str, default="herding", choices=["kcenter", "herding", "random"])
     parser.add_argument("--coreset_hidden", type=float, default=256)
     parser.add_argument("--coreset_seed", type=int, default=15)
@@ -102,14 +108,15 @@ def main():
     parser.add_argument('--test_opt_type', type=str, default='Adam')
     parser.add_argument('--test_nlayers', type=int, default=2)
     parser.add_argument('--test_hidden', type=int, default=256)
-    parser.add_argument('--expanding_window', type=bool, default=True, help='new matching strategy')
+    parser.add_argument('--expanding_window', type=str2bool, default=True, help='new matching strategy')
 
     
     args = parser.parse_args()
     torch.autograd.set_detect_anomaly(True)
 
-    torch.cuda.set_device(args.gpu_id)
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    if torch.cuda.is_available() and args.gpu_id >= 0:
+        torch.cuda.set_device(args.gpu_id)
+    device = resolve_device(args.device, args.gpu_id)
     
     # 设置日志目录
     log_dir = './' + args.save_log + '/Distill/{}-reduce_{}-{}'.format(args.dname, str(args.reduction_rate),
@@ -118,12 +125,12 @@ def main():
         os.makedirs(log_dir)
 
     # 设置缓冲区目录
-    buffer_path = os.path.join(args.save_log, "Buffer/{}-buffer".format(args.dname))
+    buffer_path = args.buffer_path or os.path.join(args.save_log, "Buffer/{}-buffer".format(args.dname))
     if not os.path.exists(buffer_path):
         os.makedirs(buffer_path)
 
     args.__setattr__("buffer_path", buffer_path)
-    args.__setattr__("device","cuda:{}".format(args.gpu_id))
+    args.__setattr__("device", str(device))
     args.__setattr__("log_dir", log_dir)
 
     # 设置日志格式
@@ -138,7 +145,8 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
 
     logging.info("args = {}".format(args))
 
@@ -156,7 +164,7 @@ def main():
     agent = MetaGtt(data, split_idx_lst, args, device=device)
       
     # 创建SummaryWriter实例
-    writer = SummaryWriter()
+    writer = get_summary_writer()
 
     # 执行蒸馏过程
     agent.distill(writer)

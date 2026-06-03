@@ -3,7 +3,7 @@ import torch.nn as nn
 import logging
 from dhg import Hypergraph
 from model.hypergcn import HyperGCN as DHGHyperGCN
-from preprocessing import get_HyperGCN_He_dict
+from .preprocessing import get_HyperGCN_He_dict
 
 class HyperGCNWrapper(nn.Module):
     """

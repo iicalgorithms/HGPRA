@@ -8,10 +8,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import deeprobust.graph.utils as utils
 from copy import deepcopy
 from tqdm import tqdm
 from utils.dataloader import load_data
+from utils.utils import accuracy
 from model.model_loader import parse_method
 from model.reparam_module import ReparamModule
 from torch_geometric.data import Data
@@ -362,17 +362,17 @@ class MetaGtt:
             if args.whole_data == 1:
                 # 对于硬标签，直接使用 CrossEntropyLoss（输入为 logits）
                 loss_train = F.cross_entropy(output_syn[self.train_idx], labels_syn[self.train_idx])
-                acc_syn = utils.accuracy(output_syn[self.train_idx], labels_syn[self.train_idx])
+                acc_syn = accuracy(output_syn[self.train_idx], labels_syn[self.train_idx])
             else:
                 if args.soft_label:
                     output_syn = F.log_softmax(output_syn, dim=1)
                     labels_syn_log = F.log_softmax(labels_syn, dim=1)
                     loss_train = torch.nn.KLDivLoss(reduction="batchmean", log_target=True)(output_syn, labels_syn_log)
-                    acc_syn = utils.accuracy(output_syn, torch.argmax(labels_syn, dim=1))
+                    acc_syn = accuracy(output_syn, torch.argmax(labels_syn, dim=1))
                 else:
                     # 纠正：当 soft_label 关闭时采用 CrossEntropyLoss
                     loss_train = F.cross_entropy(output_syn, labels_syn)
-                    acc_syn = utils.accuracy(output_syn, labels_syn)
+                    acc_syn = accuracy(output_syn, labels_syn)
 
             loss_train.backward()
             optimizer.step()
@@ -387,8 +387,8 @@ class MetaGtt:
                 if isinstance(output, tuple):
                     output = output[0]
 
-                acc_val = utils.accuracy(output[self.val_idx], labels_val)
-                acc_test = utils.accuracy(output[self.test_idx], labels_test)
+                acc_val = accuracy(output[self.val_idx], labels_val)
+                acc_test = accuracy(output[self.test_idx], labels_test)
 
                 if acc_val.item() > best_acc_val + 1e-6:      # 有显著提升
                     best_acc_val  = acc_val.item()
@@ -633,11 +633,11 @@ class MetaGtt:
                     loss_syn = torch.nn.KLDivLoss(reduction="batchmean", log_target=True)(
                         output_syn, labels_syn
                     )
-                    acc_syn = utils.accuracy(output_syn, torch.argmax(self.labels_syn, dim=1))
+                    acc_syn = accuracy(output_syn, torch.argmax(self.labels_syn, dim=1))
                 else:
                     # 使用 CrossEntropyLoss 以避免 log-softmax 不匹配问题
                     loss_syn = F.cross_entropy(output_syn, self.labels_syn)
-                    acc_syn = utils.accuracy(output_syn, self.labels_syn)
+                    acc_syn = accuracy(output_syn, self.labels_syn)
 
                 # 计算梯度并更新参数
                 grad = torch.autograd.grad(loss_syn, student_params[-1], create_graph=True)[0]
@@ -651,7 +651,7 @@ class MetaGtt:
                         output_test = output_test[0]
 
                     # 评估准确率
-                    acc_test = utils.accuracy(
+                    acc_test = accuracy(
                         output_test[self.test_idx],
                         self.data_all.y[self.test_idx]
                     )
@@ -745,8 +745,8 @@ class MetaGtt:
             if torch.isnan(total_loss) or torch.isnan(grand_loss):
                 break  # 遇到NaN就退出
             if it % 1 == 0:
-                import wandb
                 if args.wandb:
+                    import wandb
                     wandb.log({"total_loss": total_loss.item()})
                 logging.info(
                     "Iteration {}: Total_Loss = {:.4f}, Grand_Loss={:.4f}, Start_Epoch= {}, Student_LR = {:6f}".format(
@@ -770,6 +770,7 @@ class MetaGtt:
                     best_acc_test = np.mean(np.array(best_acc_test))
 
                     if args.wandb:
+                        import wandb
                         wandb.log({"test_acc_mean": best_acc_test})
 
                     # 保存最优模型（ 保存H_syn）

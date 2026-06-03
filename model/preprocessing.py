@@ -242,12 +242,12 @@ def generate_G_from_H(data):
     # the degree of the hyperedge
     DE = np.sum(H, axis=0)
 
-    invDE = np.mat(np.diag(np.power(DE, -1)))
-    DV2 = np.mat(np.diag(np.power(DV, -0.5)))
+    invDE = np.asmatrix(np.diag(np.power(DE, -1)))
+    DV2 = np.asmatrix(np.diag(np.power(DV, -0.5)))
 #     replace nan with 0. This is caused by isolated nodes
     DV2 = np.nan_to_num(DV2)
-    W = np.mat(np.diag(W))
-    H = np.mat(H)
+    W = np.asmatrix(np.diag(W))
+    H = np.asmatrix(H)
     HT = H.T
 
 #     if variable_weight:

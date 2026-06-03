@@ -1,6 +1,5 @@
 # from model import HGNN, HGNN_PLUS, HNHN, UNIGAT, HyperGCN
-
-
+from .models import CEGCN, CEGAT, HGNN, HNHN, HCHA, MLP_model, UniGCNII, UniGNN
 # def load_model(model_type, input_dim, hidden_dim, num_class, dropout=0.1, use_bn=False):
 #     if model_type == 'HGNN':
 #         return HGNN(input_dim, hidden_dim, num_class, num_layers=2, drop_rate=dropout)
@@ -15,14 +14,12 @@
 #     else:
 #         raise NotImplementedError(f"Model {model_type} not implemented.")
 
-import torch_sparse
-from models import *
-from layers import *
-from preprocessing import get_HyperGCN_He_dict
+
+# from .layers import *
+from .preprocessing import get_HyperGCN_He_dict
 from scipy.sparse import coo_matrix
 import torch
 import torch.nn as nn
-from dhg import Hypergraph
 
 
 def parse_method(args, data):

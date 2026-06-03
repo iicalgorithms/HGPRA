@@ -7,14 +7,39 @@
 import torch
 import pickle
 import os
-import ipdb
 
 import os.path as osp
 
 from torch_geometric.data import Data
 from torch_geometric.data import InMemoryDataset
 
-from load_other_datasets import * 
+
+def _load_raw_dataset_functions():
+    try:
+        from .load_other_datasets import (
+            load_LE_dataset,
+            load_citation_dataset,
+            load_cornell_dataset,
+            load_tencent_2k_dataset,
+            load_yelp_dataset,
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name not in {__package__, "pretreatment.load_other_datasets", "load_other_datasets"}:
+            raise
+        from load_other_datasets import (
+            load_LE_dataset,
+            load_citation_dataset,
+            load_cornell_dataset,
+            load_tencent_2k_dataset,
+            load_yelp_dataset,
+        )
+    return {
+        "load_LE_dataset": load_LE_dataset,
+        "load_citation_dataset": load_citation_dataset,
+        "load_cornell_dataset": load_cornell_dataset,
+        "load_tencent_2k_dataset": load_tencent_2k_dataset,
+        "load_yelp_dataset": load_yelp_dataset,
+    }
 
 
 def save_data_to_pickle(data, p2root = './data/', file_name = None):
@@ -60,21 +85,25 @@ class dataset_Hypergraph(InMemoryDataset):
         
         self._train_percent = train_percent
 
-        
-        if (p2raw is not None) and osp.isdir(p2raw):
-            self.p2raw = p2raw
-        elif p2raw is None:
-            self.p2raw = None
-        elif not osp.isdir(p2raw):
-            raise ValueError(f'path to raw hypergraph dataset "{p2raw}" does not exist!')
-        
         if not osp.isdir(root):
             os.makedirs(root)
             
         self.root = root
         self.myraw_dir = osp.join(root, self.name, 'raw')
         self.myprocessed_dir = osp.join(root, self.name, 'processed')
-        
+
+        processed_name = f'data_noise_{self.feature_noise}.pt' if self.feature_noise is not None else 'data.pt'
+        processed_path = osp.join(self.myprocessed_dir, processed_name)
+
+        if (p2raw is not None) and osp.isdir(p2raw):
+            self.p2raw = p2raw
+        elif p2raw is None:
+            self.p2raw = None
+        elif osp.isfile(processed_path):
+            self.p2raw = p2raw
+        elif not osp.isdir(p2raw):
+            raise ValueError(f'path to raw hypergraph dataset "{p2raw}" does not exist!')
+	        
         super(dataset_Hypergraph, self).__init__(osp.join(root, name), transform, pre_transform)
 
         self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
@@ -111,6 +140,7 @@ class dataset_Hypergraph(InMemoryDataset):
 
 
     def download(self):
+        loaders = _load_raw_dataset_functions()
         for name in self.raw_file_names:
             p2f = osp.join(self.myraw_dir, name)
             if not osp.isfile(p2f):
@@ -120,21 +150,21 @@ class dataset_Hypergraph(InMemoryDataset):
                 print(self.name)
 
                 if self.name in ['cora', 'citeseer', 'pubmed']:
-                    tmp_data = load_citation_dataset(path = self.p2raw,
+                    tmp_data = loaders["load_citation_dataset"](path = self.p2raw,
                             dataset = self.name, 
                             train_percent = self._train_percent)
 
                 elif self.name in ['coauthor_cora', 'coauthor_dblp']:
                     assert 'coauthorship' in self.p2raw
                     dataset_name = self.name.split('_')[-1]
-                    tmp_data = load_citation_dataset(path = self.p2raw,
+                    tmp_data = loaders["load_citation_dataset"](path = self.p2raw,
                             dataset = dataset_name,
                             train_percent = self._train_percent)
 
                 elif self.name in ['amazon-reviews', 'walmart-trips', 'house-committees']:
                     if self.feature_noise is None:
                         raise ValueError(f'for cornell datasets, feature noise cannot be {self.feature_noise}')
-                    tmp_data = load_cornell_dataset(path = self.p2raw,
+                    tmp_data = loaders["load_cornell_dataset"](path = self.p2raw,
                         dataset = self.name,
                         feature_noise = self.feature_noise,
                         train_percent = self._train_percent)
@@ -143,7 +173,7 @@ class dataset_Hypergraph(InMemoryDataset):
                         raise ValueError(f'for cornell datasets, feature noise cannot be {self.feature_noise}')
                     feature_dim = int(self.name.split('-')[-1])
                     tmp_name = '-'.join(self.name.split('-')[:-1])
-                    tmp_data = load_cornell_dataset(path = self.p2raw,
+                    tmp_data = loaders["load_cornell_dataset"](path = self.p2raw,
                         dataset = tmp_name,
                         feature_dim = feature_dim,
                         feature_noise = self.feature_noise,
@@ -151,17 +181,17 @@ class dataset_Hypergraph(InMemoryDataset):
 
 
                 elif self.name == 'yelp':
-                    tmp_data = load_yelp_dataset(path = self.p2raw,
+                    tmp_data = loaders["load_yelp_dataset"](path = self.p2raw,
                             dataset = self.name,
                             train_percent = self._train_percent)
                     
                 elif self.name == 'tencent_2k':
-                    tmp_data = load_tencent_2k_dataset(path=self.p2raw,
+                    tmp_data = loaders["load_tencent_2k_dataset"](path=self.p2raw,
                                                        dataset=self.name, 
                                                        train_percent=self._train_percent)
 
                 else:
-                    tmp_data = load_LE_dataset(path = self.p2raw, 
+                    tmp_data = loaders["load_LE_dataset"](path = self.p2raw, 
                                               dataset = self.name,
                                               train_percent= self._train_percent)
                     
