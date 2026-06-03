@@ -3,7 +3,6 @@ import sys
 import math
 import logging
 import datetime
-import wandb
 import torch.nn as nn
 import argparse
 import torch
@@ -25,9 +24,54 @@ def init_logger(args, log_dir):
 
 
 def init_wandb(args, tags=None):
+    import wandb
     wandb.init(project='Condense_HGraph', entity='', config=vars(args), tags=[f'{tag}' for tag in tags])
     args = argparse.Namespace(**wandb.config)
     return args
+
+
+class NullSummaryWriter:
+    def add_scalar(self, *args, **kwargs):
+        return None
+
+    def close(self):
+        return None
+
+
+def get_summary_writer(*args, **kwargs):
+    try:
+        from tensorboardX import SummaryWriter
+        return SummaryWriter(*args, **kwargs)
+    except ImportError:
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            return SummaryWriter(*args, **kwargs)
+        except ImportError:
+            logging.warning("TensorBoard is not installed; using a no-op SummaryWriter.")
+            return NullSummaryWriter()
+
+
+def accuracy(output, labels):
+    preds = output.max(1)[1].type_as(labels)
+    correct = preds.eq(labels).double()
+    return correct.sum() / len(labels)
+
+
+def resolve_device(device=None, gpu_id=None):
+    requested = str(device or "auto").lower()
+    if requested in {"auto", "default"}:
+        if torch.cuda.is_available():
+            return torch.device(f"cuda:{0 if gpu_id is None else gpu_id}")
+        return torch.device("cpu")
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        logging.warning("CUDA was requested but is unavailable; falling back to CPU.")
+        return torch.device("cpu")
+    if requested == "mps":
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        logging.warning("MPS was requested but is unavailable; falling back to CPU.")
+        return torch.device("cpu")
+    return torch.device(requested)
 
 
 def _init_weights(module):
@@ -93,18 +137,28 @@ def sort_training_nodes_bipartite(edge_index, labels, num_nodes, train_idx, devi
 
 def node_difficulty_bipartite(edge_index, labels, num_nodes, train_idx, device='cuda'):
     labels = labels.to(device)
+    train_idx = train_idx.to(device)
     idx_node = edge_index[0].to(device)
     idx_edge = edge_index[1].to(device)
     num_edges = int(idx_edge.max().item()) + 1
     num_classes = int(labels.max().item()) + 1
 
-    # 每个超边中的类别分布
-    one_hot = F.one_hot(labels[idx_node], num_classes=num_classes).float()
+    train_mask = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+    train_mask[train_idx] = True
+    valid_node_mask = (idx_node >= 0) & (idx_node < num_nodes)
+    labeled_link_mask = torch.zeros_like(valid_node_mask, dtype=torch.bool, device=device)
+    labeled_link_mask[valid_node_mask] = train_mask[idx_node[valid_node_mask]]
+
+    # 每个超边中的类别分布。Only labeled training nodes are used so PaS
+    # cannot access validation/test labels when estimating structure-label consistency.
+    labeled_nodes = idx_node[labeled_link_mask]
+    labeled_edges = idx_edge[labeled_link_mask]
+    one_hot = F.one_hot(labels[labeled_nodes], num_classes=num_classes).float()
     label_sum_per_edge = torch.zeros((num_edges, num_classes), device=device).index_add_(
-        0, idx_edge, one_hot
+        0, labeled_edges, one_hot
     )
     edge_size = torch.zeros((num_edges, 1), device=device).index_add_(
-        0, idx_edge, torch.ones_like(idx_edge, dtype=torch.float).unsqueeze(1)
+        0, labeled_edges, torch.ones_like(labeled_edges, dtype=torch.float).unsqueeze(1)
     )
     edge_distribution = label_sum_per_edge / (edge_size + 1e-10)
 
@@ -126,27 +180,36 @@ def node_difficulty_bipartite(edge_index, labels, num_nodes, train_idx, device='
     return entropy[train_idx]
 
 def sort_nodes_by_hyperedge_difficulty(edge_index, labels, num_nodes, train_idx, device='cuda'):
-    edge_difficulty = hyperedge_difficulty_bipartite(edge_index, labels, device=device)
+    edge_difficulty = hyperedge_difficulty_bipartite(edge_index, labels, num_nodes, train_idx, device=device)
     node_difficulty = node_difficulty_from_edge(edge_difficulty, edge_index, num_nodes, device=device)
     _, sorted_node_indices = torch.sort(node_difficulty[train_idx])
     return train_idx.to(sorted_node_indices.device)[sorted_node_indices].cpu().numpy()
 
 
 
-def hyperedge_difficulty_bipartite(edge_index, labels, device='cuda'):
+def hyperedge_difficulty_bipartite(edge_index, labels, num_nodes, train_idx, device='cuda'):
     idx_node = edge_index[0].to(device)
     idx_edge = edge_index[1].to(device)
     labels = labels.to(device)
+    train_idx = train_idx.to(device)
 
     num_edges = int(idx_edge.max().item()) + 1
     num_classes = int(labels.max().item()) + 1
 
-    one_hot = F.one_hot(labels[idx_node], num_classes=num_classes).float()
+    train_mask = torch.zeros(num_nodes, dtype=torch.bool, device=device)
+    train_mask[train_idx] = True
+    valid_node_mask = (idx_node >= 0) & (idx_node < num_nodes)
+    labeled_link_mask = torch.zeros_like(valid_node_mask, dtype=torch.bool, device=device)
+    labeled_link_mask[valid_node_mask] = train_mask[idx_node[valid_node_mask]]
+
+    labeled_nodes = idx_node[labeled_link_mask]
+    labeled_edges = idx_edge[labeled_link_mask]
+    one_hot = F.one_hot(labels[labeled_nodes], num_classes=num_classes).float()
     label_sum_per_edge = torch.zeros((num_edges, num_classes), device=device).index_add_(
-        0, idx_edge, one_hot
+        0, labeled_edges, one_hot
     )
     edge_size = torch.zeros((num_edges, 1), device=device).index_add_(
-        0, idx_edge, torch.ones_like(idx_edge, dtype=torch.float).unsqueeze(1)
+        0, labeled_edges, torch.ones_like(labeled_edges, dtype=torch.float).unsqueeze(1)
     )
     edge_distribution = label_sum_per_edge / (edge_size + 1e-10)
     entropy = -torch.sum(edge_distribution * torch.log(edge_distribution + torch.exp(torch.tensor(-20.0, device=device))), dim=1)

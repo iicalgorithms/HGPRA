@@ -1,17 +1,28 @@
+import os
+import sys
+
 import torch
 import pickle
 import random
 import scipy as sp
-from preprocessing import *
+# from model.preprocessing import *
 import numpy as np
-import torch_sparse
-from dhg import Hypergraph
 from sklearn.model_selection import StratifiedShuffleSplit
 from collections import defaultdict
+
+from model.preprocessing import rand_train_test_idx, ExtractV2E, Add_Self_Loops, expand_edge_index, norm_contruction, \
+    ConstructV2V, ConstructH_HNHN, generate_norm_HNHN, ConstructH, generate_G_from_H
+from pretreatment.convert_datasets_to_pygDataset import dataset_Hypergraph
 from utils import filter_hyperedge
-from convert_datasets_to_pygDataset import dataset_Hypergraph
+# from convert_datasets_to_pygDataset import dataset_Hypergraph
 from torch_geometric.data import Data
-from torch_sparse import coalesce
+
+
+def normalize_labels(data):
+    labels = data.y
+    _, normalized = torch.unique(labels, sorted=True, return_inverse=True)
+    data.y = normalized.to(torch.long).view_as(labels)
+    return int(data.y.max().item() + 1) if data.y.numel() else 0
 
 
 def mask_split(labels, num_v):
@@ -79,12 +90,7 @@ def load_data(args):
         if args.dname == 'citeseer':
             data = remove_isolated_nodes(data)
         args.num_features = dataset.num_features
-        args.num_classes = dataset.num_classes
-        # 对某些数据集的标签进行处理，使得标签的最小值从 0 开始
-        if args.dname in ['yelp', 'walmart-trips', 'house-committees', 'walmart-trips-100', 'house-committees-100']:
-            #         Shift the y label to start with 0
-            args.num_classes = len(data.y.unique())
-            data.y = data.y - data.y.min()
+        args.num_classes = normalize_labels(data)
         # 如果数据中没有n_x属性，设置它
         if not hasattr(data, 'n_x'):
             data.n_x = torch.tensor([data.x.shape[0]])
@@ -161,6 +167,14 @@ def load_data_adapt_to_model(args, data):
         data = generate_G_from_H(data)
     
     elif args.method in ['UniGCNII']:
+        try:
+            import torch_sparse
+            from torch_scatter import scatter
+        except Exception as exc:
+            raise ImportError(
+                "UniGCNII requires working torch_sparse and torch_scatter installations. "
+                "Use AllDeepSets/AllSetTransformer or reinstall PyG extensions for this Python environment."
+            ) from exc
         data = ExtractV2E(data)
         if args.add_self_loop:
             data = Add_Self_Loops(data)
@@ -176,7 +190,6 @@ def load_data_adapt_to_model(args, data):
         V, E = V.to(device), E.to(device)
 
         degV = torch.from_numpy(data.edge_index.sum(1)).view(-1, 1).float().to(device)
-        from torch_scatter import scatter
         degE = scatter(degV[V], E, dim=0, reduce='mean')
         degE = degE.pow(-0.5)
         degV = degV.pow(-0.5)

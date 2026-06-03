@@ -11,7 +11,6 @@ import argparse
 import numpy as np
 import os.path as osp
 import scipy.sparse as sp
-import torch_sparse
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -26,10 +25,19 @@ import warnings
 from model_loader import parse_method
 from model_data_parser import load_hnn_parser
 from inference import train_epoch, infer_epoch
-from dhg.random import set_seed
 from metrics import Eval_Metrics, Eval_Metrics_Average
 
 warnings.filterwarnings("ignore")
+
+
+def set_seed(seed):
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 class Logger(object):

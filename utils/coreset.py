@@ -1,26 +1,39 @@
 import os
 import sys
+ROOT_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from copy import deepcopy
 import numpy as np
 import logging
 import random
 import argparse
-from utils import init_logger, init_parameters, init_wandb, to_device, filter_hyperedge
+
+from model.model_loader import parse_method
+from utils import init_logger, init_parameters, init_wandb, resolve_device, to_device, filter_hyperedge
 from dataloader import load_data
 from coreset_utils import KCenter, Herding, Random
 from tqdm import tqdm
 import torch
 import datetime
 import torch.nn.functional as F
-from dhg.random import set_seed
-from dhg import Hypergraph
 from inference import train_epoch, infer_epoch
-from model_loader import parse_method
+# from model_loader import parse_method
 from metrics import Eval_Metrics_Average
 from model_data_parser import load_hnn_parser
 
 import warnings
 warnings.filterwarnings("ignore")
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def select_coreset(data, split_idx_lst, log_dir, device, args):
@@ -93,7 +106,7 @@ if __name__ == "__main__":
     parser.add_argument('--reduction_rate', type=float, default=0.03)
     args = parser.parse_args()
 
-    device = torch.device(args.device) if torch.cuda.is_available() else torch.device('cpu')
+    device = resolve_device(args.device)
     log_dir = './' + args.save_log + '/Coreset/{}-reduce_{}-{}'.format(args.dname, str(args.reduction_rate), args.core_method)
 
     init_logger(args, log_dir)
